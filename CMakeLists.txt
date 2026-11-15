@@ -1,0 +1,57 @@
+cmake_minimum_required(VERSION 4.2)
+project(FESA LANGUAGES CXX)
+if(NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR "FESA requires MSVC x64")
+endif()
+set(FESA_TESTING_DEFAULT OFF)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+  set(FESA_TESTING_DEFAULT ON)
+endif()
+option(BUILD_TESTING "Build the development tests" ${FESA_TESTING_DEFAULT})
+include(cmake/FesaDependencies.cmake)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+add_compile_options(/W4 /Zc:__cplusplus /utf-8 /openmp)
+add_link_options(/NODEFAULTLIB:vcomp /NODEFAULTLIB:vcompd)
+file(STRINGS build_support/fesa_sources.txt source_entries)
+foreach(entry IN LISTS source_entries)
+  if(entry MATCHES "^(core|cli|test) (.+)$")
+    list(APPEND ${CMAKE_MATCH_1}_sources "${CMAKE_MATCH_2}")
+  else()
+    message(FATAL_ERROR "Invalid source manifest entry: ${entry}")
+  endif()
+endforeach()
+add_library(fesa_core STATIC ${core_sources})
+target_include_directories(fesa_core PUBLIC include
+  PRIVATE src "${FESA_MKL_ROOT}/include" "${FESA_HDF5_ROOT}/include")
+target_compile_definitions(fesa_core PRIVATE H5_BUILT_AS_DYNAMIC_LIB)
+target_link_libraries(fesa_core PUBLIC ${FESA_MKL_LIBRARIES}
+  "${FESA_HDF5_LIBRARY}")
+add_executable(fesa_cli ${cli_sources})
+set_target_properties(fesa_cli PROPERTIES OUTPUT_NAME FESA)
+target_link_libraries(fesa_cli PRIVATE fesa_core)
+target_include_directories(fesa_cli PRIVATE src)
+if(BUILD_TESTING)
+  if(NOT test_sources)
+    message(FATAL_ERROR "Development test sources are not included in this distribution")
+  endif()
+  add_executable(fesa_tests ${test_sources}
+    "${FESA_GTEST_ROOT}/googletest/src/gtest-all.cc"
+    "${FESA_GTEST_ROOT}/googletest/src/gtest_main.cc")
+  target_include_directories(fesa_tests PRIVATE src
+    "${FESA_GTEST_ROOT}/googletest/include" "${FESA_GTEST_ROOT}/googletest")
+  target_include_directories(fesa_tests PRIVATE "${FESA_MKL_ROOT}/include"
+    "${FESA_HDF5_ROOT}/include")
+  target_compile_definitions(fesa_tests PRIVATE H5_BUILT_AS_DYNAMIC_LIB)
+  target_link_libraries(fesa_tests PRIVATE fesa_core)
+  enable_testing()
+  include(GoogleTest)
+  # scripts/test.ps1 matches GoogleTest IDs; preserve parameter/type suffixes.
+  gtest_discover_tests(fesa_tests NO_PRETTY_TYPES NO_PRETTY_VALUES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    DISCOVERY_MODE PRE_TEST)
+  set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/build_support/ctest_allocation_limits.cmake")
+endif()
